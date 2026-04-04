@@ -25,6 +25,9 @@ kind: Service
 metadata:
   name: ml-predictor
   namespace: cloud-db
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
 spec:
   selector:
     app: ml-predictor
