@@ -12,6 +12,9 @@ RUN pip install --upgrade pip && \
 
 COPY predictor.py .
 COPY load_data_pred.py .
+COPY cpu_prediction_tcn.keras .
+COPY x_scaler.save .
+COPY y_scaler.save .
 
 EXPOSE 8080
 
