@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: ml-predictor
-        image: akkaraphont/ml-predictor:v2.6
+        image: akkaraphont/ml-predictor:latest
         ports:
         - containerPort: 8080
 ---
