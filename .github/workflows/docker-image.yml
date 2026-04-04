@@ -29,4 +29,4 @@ jobs:
       with:
         context: ./ML-predictor
         push: true
-        tags: yourdockerhub/ml-predictor:latest
+        tags: ${{ secrets.DOCKER_USERNAME }}/ml-predictor:latest
