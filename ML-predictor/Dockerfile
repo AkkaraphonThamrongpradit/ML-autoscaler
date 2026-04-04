@@ -10,7 +10,8 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY predictor.py .
+COPY load_data_pred.py .
 
 EXPOSE 8080
 
