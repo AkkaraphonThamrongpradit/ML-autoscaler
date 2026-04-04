@@ -29,4 +29,5 @@ jobs:
       with:
         context: ./ML-predictor
         push: true
+        no-cache: true
         tags: ${{ secrets.DOCKER_USERNAME }}/ml-predictor:latest
