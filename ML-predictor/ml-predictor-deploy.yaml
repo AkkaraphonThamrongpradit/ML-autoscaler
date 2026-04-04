@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-predictor
+  namespace: cloud-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ml-predictor
+  template:
+    metadata:
+      labels:
+        app: ml-predictor
+    spec:
+      containers:
+      - name: ml-predictor
+        image: akkaraphont/ml-predictor:v2.6
+        ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ml-predictor
+  namespace: cloud-db
+spec:
+  selector:
+    app: ml-predictor
+  ports:
+  - port: 8080
+    targetPort: 8080

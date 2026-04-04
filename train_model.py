@@ -1,0 +1,290 @@
+import numpy as np
+import pandas as pd
+import joblib
+
+from tensorflow import keras
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv1D, Dense, GlobalAveragePooling1D
+from sklearn.preprocessing import MinMaxScaler
+
+
+from load_from_tsdb import load_data
+
+
+print("Loading data from TSDB...")
+df = load_data()
+df = df.sort_index()
+df = df.sort_values(["deployment", df.index.name])
+
+# ==================================================
+# CONFIG
+# ==================================================
+FEATURES = [
+    "cpu_avg",
+    "cpu_max",
+    "mem_avg",
+    "mem_max",
+    "pps_rx",
+    "cpu_diff",
+    "pps_rx_diff",
+    "cpu_acc",
+    "pps_rx_acc",
+    "pps_rx_ratio",
+    "pps_rx_trend",
+    "cpu_std",
+    "pps_rx_std"
+]
+
+WINDOW = 20         # -100s
+PRED_STEP = 4        # ทำนาย +20s
+N_FEATURE = len(FEATURES)
+
+GAP_THRESHOLD = "10s"   
+# ==================================================
+
+
+# --------------------------------------------------
+# 1) Handle missing values 
+# --------------------------------------------------
+
+# metric → interpolate
+for f in ["cpu_avg", "cpu_max", "mem_avg", "mem_max"]:
+    df[f] = df.groupby("deployment")[f].transform(
+        lambda x: x.interpolate(method="time")
+    )
+
+# traffic → ถ้าไม่มี = 0
+df["pps_rx"] = df["pps_rx"].fillna(0)
+
+
+# replicas ไม่ใช้ train แต่เก็บไว้
+
+df["cpu_diff"] = df.groupby("deployment")["cpu_avg"].diff()
+df["cpu_acc"] = df.groupby("deployment")["cpu_diff"].diff()
+
+df["pps_rx_diff"] = df.groupby("deployment")["pps_rx"].diff()
+df["pps_rx_acc"] = df.groupby("deployment")["pps_rx_diff"].diff()
+
+df["pps_rx_ratio"] = df["pps_rx"] / (df.groupby("deployment")["pps_rx"].shift(1) + 1)
+
+df["pps_rx_trend"] = (
+    df.groupby("deployment")["pps_rx"]
+    .rolling(4, min_periods=1)
+    .mean()
+    .reset_index(level=0, drop=True)
+)
+
+df["cpu_std"] = (
+    df.groupby("deployment")["cpu_avg"]
+    .rolling(4, min_periods=1)
+    .std()
+    .reset_index(level=0, drop=True)
+)
+
+df["pps_rx_std"] = (
+    df.groupby("deployment")["pps_rx"]
+    .rolling(4, min_periods=1)
+    .std()
+    .reset_index(level=0, drop=True)
+)
+
+df["pps_rx_diff"] = df["pps_rx_diff"].interpolate(method="time")
+df["pps_rx_diff"] = df["pps_rx_diff"].fillna(0)
+df["pps_rx_acc"] = df["pps_rx_acc"].interpolate(method="time")
+df["pps_rx_acc"] = df["pps_rx_acc"].fillna(0)
+df["pps_rx_ratio"] = df["pps_rx_ratio"].replace([np.inf, -np.inf], np.nan)
+df["pps_rx_ratio"] = df["pps_rx_ratio"].fillna(1)
+df["pps_rx_trend"] = df["pps_rx_trend"].bfill()
+df["cpu_std"] = df["cpu_std"].bfill()
+df["pps_rx_std"] = df["pps_rx_std"].bfill()
+
+df = df.dropna(subset=FEATURES)
+
+# --------------------------------------------------
+# 3) Model
+# --------------------------------------------------
+model = Sequential([
+    keras.Input(shape=(WINDOW, N_FEATURE)),
+
+    Conv1D(64, 3, padding="causal", dilation_rate=1, activation="relu"),
+    Conv1D(64, 3, padding="causal", dilation_rate=2, activation="relu"),
+    Conv1D(64, 3, padding="causal", dilation_rate=4, activation="relu"),
+
+    Conv1D(32, 3, padding="causal", dilation_rate=8, activation="relu"),
+
+    GlobalAveragePooling1D(),
+
+    Dense(64, activation="relu"),
+    Dense(1)
+])
+
+model.compile(
+    optimizer=keras.optimizers.Adam(learning_rate=0.001, clipnorm=1.0),
+    loss=keras.losses.Huber(),
+    metrics=["mae"]
+)
+
+# --------------------------------------------------
+# 4) function แยก segment ต่อเนื่อง
+# --------------------------------------------------
+def split_continuous_segments(df_dep):
+
+    df_dep = df_dep.copy()
+
+    gaps = df_dep.index.to_series().diff() > pd.Timedelta(GAP_THRESHOLD)
+
+    segs = []
+    start = 0
+
+    for i in range(1, len(df_dep)):
+        if gaps.iloc[i]:
+            segs.append(df_dep.iloc[start:i])
+            start = i
+
+    segs.append(df_dep.iloc[start:])
+
+    return segs
+
+# --------------------------------------------------
+# 5) Build GLOBAL dataset จากทุก deployment
+# --------------------------------------------------
+
+deployments = df["deployment"].unique()
+
+X_train_global = []
+y_train_global = []
+
+X_test_global = []
+y_test_global = []
+
+for dep in deployments:
+
+    print("\nCollecting data from:", dep)
+
+    df_dep = df[df["deployment"] == dep]
+
+    # แยก train/test ตามเวลา
+    split_time = df_dep.index.to_series().quantile(0.8)
+
+    train_df = df_dep[df_dep.index <= split_time]
+    test_df  = df_dep[df_dep.index > split_time]
+
+    train_segments = split_continuous_segments(train_df)
+    test_segments  = split_continuous_segments(test_df)
+
+    for seg in train_segments:
+
+        if len(seg) < WINDOW + PRED_STEP:
+            continue
+
+        data = seg[FEATURES].values
+
+        for i in range(len(data) - WINDOW - PRED_STEP + 1):
+
+            x = data[i : i + WINDOW]
+
+            future_cpu = seg["cpu_max"].values[i + WINDOW : i + WINDOW + PRED_STEP]
+
+            y = np.max(future_cpu)
+
+            X_train_global.append(x)
+            y_train_global.append(y)
+    for seg in test_segments:
+
+        if len(seg) < WINDOW + PRED_STEP:
+            continue
+
+        data = seg[FEATURES].values
+
+        for i in range(len(data) - WINDOW - PRED_STEP + 1):
+
+            x = data[i : i + WINDOW]
+
+            future_cpu = seg["cpu_max"].values[i + WINDOW : i + WINDOW + PRED_STEP]
+
+            y = np.max(future_cpu)
+
+            X_test_global.append(x)
+            y_test_global.append(y)
+
+# --------------------------------------------
+# แปลงเป็น numpy array ครั้งเดียว
+# --------------------------------------------
+X_train_raw = np.asarray(X_train_global, dtype=np.float32)
+y_train_raw = np.asarray(y_train_global, dtype=np.float32)
+
+X_test_raw = np.asarray(X_test_global, dtype=np.float32)
+if len(X_test_raw) == 0:
+    raise ValueError("Test dataset empty after split")
+y_test_raw = np.asarray(y_test_global, dtype=np.float32)
+
+# --------------------------------------------------
+# scale features (fit only on train)
+# --------------------------------------------------
+
+x_scaler = MinMaxScaler()
+x_scaler.fit(X_train_raw.reshape(-1, N_FEATURE))
+
+X_train = x_scaler.transform(
+    X_train_raw.reshape(-1, N_FEATURE)
+).reshape(-1, WINDOW, N_FEATURE)
+
+X_test = x_scaler.transform(
+    X_test_raw.reshape(-1, N_FEATURE)
+).reshape(-1, WINDOW, N_FEATURE)
+
+print("\nGLOBAL dataset shape:")
+print("X_train:", X_train_raw.shape)
+print("y_train:", y_train_raw.shape)
+print("X_test:", X_test_raw.shape)
+print("y_test:", y_test_raw.shape)
+
+if len(X_train_raw) < 100:
+    raise ValueError("Train dataset too small")
+
+y_scaler = MinMaxScaler()
+y_scaler.fit(y_train_raw.reshape(-1,1))
+
+y_train = y_scaler.transform(y_train_raw.reshape(-1,1)).flatten()
+y_test = y_scaler.transform(y_test_raw.reshape(-1,1)).flatten()
+
+print("\nTrain shape:", X_train.shape)
+print("Test shape:", X_test.shape)
+
+# --------------------------------------------------
+# 6) Train GLOBAL model
+# --------------------------------------------------
+
+history = model.fit(
+    X_train,
+    y_train,
+    validation_data=(X_test, y_test),
+    epochs=70,
+    batch_size=64,
+    shuffle=False,
+    callbacks=[
+        keras.callbacks.EarlyStopping(
+            patience=8,
+            restore_best_weights=True
+        ),
+        keras.callbacks.ReduceLROnPlateau(
+            monitor="val_loss",
+            factor=0.5,
+            patience=3,
+            min_lr=1e-5
+        )
+    ]
+)
+
+loss, mae = model.evaluate(X_test, y_test)
+
+print("\nGLOBAL MAE:", mae)
+
+# --------------------------------------------------
+# 6) Save
+# --------------------------------------------------
+model.save("cpu_prediction_tcn.keras")
+joblib.dump(x_scaler, "x_scaler.save")
+joblib.dump(y_scaler, "y_scaler.save")
+
+print("DONE → model train")
