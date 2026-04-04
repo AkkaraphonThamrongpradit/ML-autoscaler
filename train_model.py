@@ -4,7 +4,7 @@ import joblib
 
 from tensorflow import keras
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv1D, Dense, GlobalAveragePooling1D
+from tensorflow.keras.layers import Conv1D, Dense, Flatten
 from sklearn.preprocessing import MinMaxScaler
 
 
@@ -112,7 +112,7 @@ model = Sequential([
 
     Conv1D(32, 3, padding="causal", dilation_rate=8, activation="relu"),
 
-    GlobalAveragePooling1D(),
+    Flatten(),
 
     Dense(64, activation="relu"),
     Dense(1)
