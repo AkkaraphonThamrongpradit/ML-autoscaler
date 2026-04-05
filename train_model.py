@@ -105,8 +105,8 @@ df = df.dropna(subset=FEATURES)
 # --------------------------------------------------
 def hpa_weighted_loss(y_true, y_pred):
     error = y_true - y_pred
-    # ถ้าทายต่ำกว่าจริง (error > 0) ให้คูณ 2.5 เท่า, ถ้าทายสูงกว่าจริง (error < 0) ให้คูณ 1.0
-    weight = tf.where(error > 0, 2.5, 1.0)
+    # ถ้าทายต่ำกว่าจริง (error > 0) ให้คูณ 5 เท่า, ถ้าทายสูงกว่าจริง (error < 0) ให้คูณ 1.0
+    weight = tf.where(error > 0, 5, 1.0)
     return tf.reduce_mean(weight * tf.square(error)) # ใช้ MSE base เพื่อให้ตอบสนองต่อ Spike แรงๆ
 
 # --------------------------------------------------
@@ -192,7 +192,9 @@ for dep in deployments:
 
             x = data[i : i + WINDOW]
 
-            y = seg["cpu_max"].values[i + WINDOW + PRED_STEP - 1]
+            future_cpu = seg["cpu_max"].values[i + WINDOW : i + WINDOW + PRED_STEP]
+
+            y = np.max(future_cpu)
 
             X_train_global.append(x)
             y_train_global.append(y)
@@ -207,7 +209,9 @@ for dep in deployments:
 
             x = data[i : i + WINDOW]
 
-            y = seg["cpu_max"].values[i + WINDOW + PRED_STEP - 1]
+            future_cpu = seg["cpu_max"].values[i + WINDOW : i + WINDOW + PRED_STEP]
+
+            y = np.max(future_cpu)
 
             X_test_global.append(x)
             y_test_global.append(y)
