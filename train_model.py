@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import joblib
 
+import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv1D, Dense, Flatten
@@ -99,6 +100,14 @@ df["cpu_std"] = df["cpu_std"].bfill()
 df["pps_rx_std"] = df["pps_rx_std"].bfill()
 
 df = df.dropna(subset=FEATURES)
+# --------------------------------------------------
+# Custom loss
+# --------------------------------------------------
+def hpa_weighted_loss(y_true, y_pred):
+    error = y_true - y_pred
+    # ถ้าทายต่ำกว่าจริง (error > 0) ให้คูณ 2.5 เท่า, ถ้าทายสูงกว่าจริง (error < 0) ให้คูณ 1.0
+    weight = tf.where(error > 0, 2.5, 1.0)
+    return tf.reduce_mean(weight * tf.square(error)) # ใช้ MSE base เพื่อให้ตอบสนองต่อ Spike แรงๆ
 
 # --------------------------------------------------
 # 3) Model
@@ -120,7 +129,7 @@ model = Sequential([
 
 model.compile(
     optimizer=keras.optimizers.Adam(learning_rate=0.001, clipnorm=1.0),
-    loss="mse",
+    loss=hpa_weighted_loss,
     metrics=["mae"]
 )
 
