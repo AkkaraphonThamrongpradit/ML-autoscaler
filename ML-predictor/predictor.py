@@ -30,7 +30,7 @@ FEATURES = [
 ]
 
 WINDOW = 20
-GAP_THRESHOLD = "10s"
+GAP_THRESHOLD = "15s"
 # =========================
 
 model = keras.models.load_model("cpu_prediction_tcn.keras", compile=False)
@@ -70,21 +70,21 @@ def preprocess(df_dep: pd.DataFrame):
 
     df_dep["pps_rx_trend"] = (
         df_dep.groupby("deployment")["pps_rx"]
-        .rolling(4, min_periods=1)
+        .rolling(12, min_periods=1)
         .mean()
         .reset_index(level=0, drop=True)
     )
 
     df_dep["cpu_std"] = (
         df_dep.groupby("deployment")["cpu_avg"]
-        .rolling(4, min_periods=1)
+        .rolling(12, min_periods=1)
         .std()
         .reset_index(level=0, drop=True)
     )
 
     df_dep["pps_rx_std"] = (
         df_dep.groupby("deployment")["pps_rx"]
-        .rolling(4, min_periods=1)
+        .rolling(12, min_periods=1)
         .std()
         .reset_index(level=0, drop=True)
     )

@@ -39,7 +39,7 @@ WINDOW = 20         # -100s
 PRED_STEP = 4        # ทำนาย +20s
 N_FEATURE = len(FEATURES)
 
-GAP_THRESHOLD = "10s"   
+GAP_THRESHOLD = "15s"   
 # ==================================================
 
 
@@ -69,21 +69,21 @@ df["pps_rx_ratio"] = df["pps_rx"] / (df.groupby("deployment")["pps_rx"].shift(1)
 
 df["pps_rx_trend"] = (
     df.groupby("deployment")["pps_rx"]
-    .rolling(4, min_periods=1)
+    .rolling(12, min_periods=1)
     .mean()
     .reset_index(level=0, drop=True)
 )
 
 df["cpu_std"] = (
     df.groupby("deployment")["cpu_avg"]
-    .rolling(4, min_periods=1)
+    .rolling(12, min_periods=1)
     .std()
     .reset_index(level=0, drop=True)
 )
 
 df["pps_rx_std"] = (
     df.groupby("deployment")["pps_rx"]
-    .rolling(4, min_periods=1)
+    .rolling(12, min_periods=1)
     .std()
     .reset_index(level=0, drop=True)
 )
@@ -120,7 +120,7 @@ model = Sequential([
 
 model.compile(
     optimizer=keras.optimizers.Adam(learning_rate=0.001, clipnorm=1.0),
-    loss=keras.losses.Huber(),
+    loss="mse",
     metrics=["mae"]
 )
 
@@ -183,9 +183,7 @@ for dep in deployments:
 
             x = data[i : i + WINDOW]
 
-            future_cpu = seg["cpu_max"].values[i + WINDOW : i + WINDOW + PRED_STEP]
-
-            y = np.max(future_cpu)
+            y = seg["cpu_max"].values[i + WINDOW + PRED_STEP - 1]
 
             X_train_global.append(x)
             y_train_global.append(y)
@@ -200,9 +198,7 @@ for dep in deployments:
 
             x = data[i : i + WINDOW]
 
-            future_cpu = seg["cpu_max"].values[i + WINDOW : i + WINDOW + PRED_STEP]
-
-            y = np.max(future_cpu)
+            y = seg["cpu_max"].values[i + WINDOW + PRED_STEP - 1]
 
             X_test_global.append(x)
             y_test_global.append(y)
@@ -261,7 +257,7 @@ history = model.fit(
     validation_data=(X_test, y_test),
     epochs=70,
     batch_size=64,
-    shuffle=False,
+    shuffle=True,
     callbacks=[
         keras.callbacks.EarlyStopping(
             patience=8,
