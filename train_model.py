@@ -106,7 +106,7 @@ df = df.dropna(subset=FEATURES)
 def hpa_weighted_loss(y_true, y_pred):
     error = y_true - y_pred
     # ถ้าทายต่ำกว่าจริง (error > 0) ให้คูณ 5 เท่า, ถ้าทายสูงกว่าจริง (error < 0) ให้คูณ 1.0
-    weight = tf.where(error > 0, 5, 1.0)
+    weight = tf.where(error > 0, 5.0, 1.0)
     return tf.reduce_mean(weight * tf.square(error)) # ใช้ MSE base เพื่อให้ตอบสนองต่อ Spike แรงๆ
 
 # --------------------------------------------------
