@@ -1,13 +1,15 @@
-name: Build and Push Docker Image
+name: Build and Push Ingestor Image
 
 on:
   push:
     branches:
-      - main
+        - main
+    paths:
+      - 'Ingestor/**'
+      - '.github/workflows/ingestor.yml'
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
@@ -27,7 +29,7 @@ jobs:
     - name: Build and Push Image
       uses: docker/build-push-action@v5
       with:
-        context: ./ML-predictor
+        context: ./Ingestor
         push: true
         no-cache: true
-        tags: ${{ secrets.DOCKER_USERNAME }}/ml-predictor:latest
+        tags: ${{ secrets.DOCKER_USERNAME }}/autoscale-ingestor:latest
