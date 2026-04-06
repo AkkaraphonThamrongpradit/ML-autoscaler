@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: autoscale-ingestor-config
+  namespace: cloud-db
+data:
+  PROM_URL: "http://prometheus.monitoring:9090"
+  POLL_INTERVAL: "15"
+
+  DB_HOST: "systemdb.cloud-db.svc.cluster.local"
+  DB_PORT: "5432"
+  DB_NAME: "autoscale-db"
+  DB_USER: "admin"
+  DB_PASS: "admin123"

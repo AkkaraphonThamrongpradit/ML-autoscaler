@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: autoscale-ingestor
+  namespace: cloud-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: autoscale-ingestor
+  template:
+    metadata:
+      labels:
+        app: autoscale-ingestor
+    spec:
+      containers:
+      - name: ingestor
+        image: akkaraphont/autoscale-ingestor:v4
+        imagePullPolicy: IfNotPresent
+
+        envFrom:
+        - configMapRef:
+            name: autoscale-ingestor-config
+
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "300m"
+            memory: "256Mi"
+
+        livenessProbe:
+          exec:
+            command:
+            - echo
+            - ok
+          initialDelaySeconds: 10
+          periodSeconds: 30
