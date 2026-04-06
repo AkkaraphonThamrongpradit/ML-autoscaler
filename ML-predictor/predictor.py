@@ -29,8 +29,8 @@ FEATURES = [
     "pps_rx_std"
 ]
 
-WINDOW = 20
-GAP_THRESHOLD = "15s"
+WINDOW = 100         # -100s
+GAP_THRESHOLD = "5s"
 # =========================
 
 model = keras.models.load_model("cpu_prediction_tcn.keras", compile=False)

@@ -5,8 +5,8 @@ import joblib
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv1D, Dense, Flatten
-from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.layers import Conv1D, Dense, GlobalMaxPooling1D
+from sklearn.preprocessing import RobustScaler
 
 
 from load_from_tsdb import load_data
@@ -36,11 +36,11 @@ FEATURES = [
     "pps_rx_std"
 ]
 
-WINDOW = 20         # -100s
-PRED_STEP = 4        # ทำนาย +20s
+WINDOW = 100         # -100s
+PRED_STEP = 20        # ทำนาย +20s
 N_FEATURE = len(FEATURES)
 
-GAP_THRESHOLD = "15s"   
+GAP_THRESHOLD = "5s"   
 # ==================================================
 
 
@@ -100,14 +100,6 @@ df["cpu_std"] = df["cpu_std"].bfill()
 df["pps_rx_std"] = df["pps_rx_std"].bfill()
 
 df = df.dropna(subset=FEATURES)
-# --------------------------------------------------
-# Custom loss
-# --------------------------------------------------
-def hpa_weighted_loss(y_true, y_pred):
-    error = y_true - y_pred
-    # ถ้าทายต่ำกว่าจริง (error > 0) ให้คูณ 5.0 เท่า, ถ้าทายสูงกว่าจริง (error < 0) ให้คูณ 1.0
-    weight = tf.where(error > 0, 5.0, 1.0)
-    return tf.reduce_mean(weight * tf.square(error)) # ใช้ MSE base เพื่อให้ตอบสนองต่อ Spike แรงๆ
 
 # --------------------------------------------------
 # 3) Model
@@ -121,7 +113,7 @@ model = Sequential([
 
     Conv1D(32, 3, padding="causal", dilation_rate=8, activation="relu"),
 
-    Flatten(),
+    GlobalMaxPooling1D(),
 
     Dense(64, activation="relu"),
     Dense(1)
@@ -129,7 +121,7 @@ model = Sequential([
 
 model.compile(
     optimizer=keras.optimizers.Adam(learning_rate=0.001, clipnorm=1.0),
-    loss=hpa_weighted_loss,
+    loss=tf.keras.losses.Huber(delta=0.1),
     metrics=["mae"]
 )
 
@@ -231,7 +223,7 @@ y_test_raw = np.asarray(y_test_global, dtype=np.float32)
 # scale features (fit only on train)
 # --------------------------------------------------
 
-x_scaler = MinMaxScaler()
+x_scaler = RobustScaler()
 x_scaler.fit(X_train_raw.reshape(-1, N_FEATURE))
 
 X_train = x_scaler.transform(
@@ -251,7 +243,7 @@ print("y_test:", y_test_raw.shape)
 if len(X_train_raw) < 100:
     raise ValueError("Train dataset too small")
 
-y_scaler = MinMaxScaler()
+y_scaler = RobustScaler()
 y_scaler.fit(y_train_raw.reshape(-1,1))
 
 y_train = y_scaler.transform(y_train_raw.reshape(-1,1)).flatten()
