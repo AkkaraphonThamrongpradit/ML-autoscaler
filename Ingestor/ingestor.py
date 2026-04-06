@@ -66,7 +66,7 @@ avg by (owner_name) (
   rate(container_cpu_usage_seconds_total{container!=""}[1m])
   * on(pod, namespace) group_left(owner_name)
   kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}
-)
+) * 1000
 """,
 
 "cpu_max": """
@@ -74,7 +74,7 @@ max by (owner_name) (
   rate(container_cpu_usage_seconds_total{container!=""}[1m])
   * on(pod, namespace) group_left(owner_name)
   kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}
-)
+) * 1000
 """,
 
 "mem_avg": """
@@ -82,7 +82,7 @@ avg by (owner_name) (
   container_memory_usage_bytes{container!=""}
   * on(pod, namespace) group_left(owner_name)
   kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}
-)
+) / 1048576
 """,
 
 "mem_max": """
@@ -90,7 +90,7 @@ max by (owner_name) (
   container_memory_usage_bytes{container!=""}
   * on(pod, namespace) group_left(owner_name)
   kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}
-)
+) / 1048576
 """,
 
 "replicas": """
