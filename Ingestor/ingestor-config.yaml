@@ -4,7 +4,7 @@ metadata:
   name: autoscale-ingestor-config
   namespace: cloud-db
 data:
-  PROM_URL: "http://prometheus-stack-server.monitoring:9090"
+  PROM_URL: "http://13.250.203.51:32347"
   POLL_INTERVAL: "1"
 
   DB_HOST: "systemdb.cloud-db.svc.cluster.local"
