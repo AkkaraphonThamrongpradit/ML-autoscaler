@@ -2,14 +2,26 @@ import os
 import time
 import requests
 import psycopg2
+
+from psycopg2 import OperationalError, InterfaceError
+
 from datetime import datetime, timezone
+
 
 PROM_URL = os.getenv("PROM_URL", "http://prometheus.monitoring:9090")
 INTERVAL = int(os.getenv("POLL_INTERVAL", "15"))
 
+DB = None
+
+
+# ---------- DB CONNECT ----------
+
 def connect_db():
+
     while True:
+
         try:
+
             print("Connecting to DB...",
                   os.getenv("DB_HOST"),
                   os.getenv("DB_PORT"))
@@ -22,14 +34,28 @@ def connect_db():
                 password=os.getenv("DB_PASS")
             )
 
+            conn.autocommit = False
+
             print("DB CONNECTED!")
+
             return conn
 
         except Exception as e:
+
             print("DB CONNECT ERROR:", e)
             time.sleep(5)
 
-DB = connect_db()
+
+def get_db():
+
+    global DB
+
+    if DB is None or DB.closed:
+        print("DB connection closed. Reconnecting...")
+        DB = connect_db()
+
+    return DB
+
 
 # ---------- Prometheus Queries ----------
 
@@ -39,7 +65,7 @@ QUERIES = {
 avg by (owner_name) (
   rate(container_cpu_usage_seconds_total{container!=""}[1m])
   * on(pod, namespace) group_left(owner_name)
-  kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"compute.*"}
+  kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}
 )
 """,
 
@@ -47,7 +73,7 @@ avg by (owner_name) (
 max by (owner_name) (
   rate(container_cpu_usage_seconds_total{container!=""}[1m])
   * on(pod, namespace) group_left(owner_name)
-  kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"compute.*"}
+  kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}
 )
 """,
 
@@ -55,7 +81,7 @@ max by (owner_name) (
 avg by (owner_name) (
   container_memory_usage_bytes{container!=""}
   * on(pod, namespace) group_left(owner_name)
-  kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"compute.*"}
+  kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}
 )
 """,
 
@@ -63,7 +89,7 @@ avg by (owner_name) (
 max by (owner_name) (
   container_memory_usage_bytes{container!=""}
   * on(pod, namespace) group_left(owner_name)
-  kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"compute.*"}
+  kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}
 )
 """,
 
@@ -71,49 +97,59 @@ max by (owner_name) (
 sum by (owner_name) (
   kube_pod_status_ready
   * on(pod, namespace) group_left(owner_name)
-  kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"compute.*"}
+  kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}
 )
 """,
 
-"rps": """
+"pps_rx": """
 sum by (owner_name) (
   rate(container_network_receive_packets_total{
     interface="eth0",
     namespace="edge-apps",
-    pod=~"compute-node-.*"
+    pod=~"ems-worker-.*"
   }[1m])
   * on(pod, namespace) group_left(owner_name)
   kube_pod_owner{
     owner_kind="ReplicaSet",
-    owner_name=~"compute.*"
+    owner_name=~"ems-worker-.*"
   }
 )
 """
 
-
 }
 
-# ---------- Helpers ----------
+
+# ---------- Prometheus ----------
 
 def query_prom(q):
+
     r = requests.get(
         f"{PROM_URL}/api/v1/query",
         params={"query": q},
         timeout=10
     )
+
+    r.raise_for_status()
+
     return r.json()["data"]["result"]
 
 
 def collect_all():
+
     data = {}
 
     for key, q in QUERIES.items():
+
         result = query_prom(q)
 
         for row in result:
+
             dep = row["metric"].get("owner_name")
+
             if not dep:
                 continue
+            
+            dep = dep.rsplit("-", 1)[0]
 
             value = float(row["value"][1])
 
@@ -125,6 +161,8 @@ def collect_all():
     return data
 
 
+# ---------- UPSERT ----------
+
 def upsert(ts, dep, m):
 
     payload = (
@@ -134,27 +172,14 @@ def upsert(ts, dep, m):
         m.get("cpu_max"),
         m.get("mem_avg"),
         m.get("mem_max"),
-        m.get("rps"),
+        m.get("pps_rx"),
         int(float(m.get("replicas", 1)))
     )
-
-    # ===== DEBUG ก่อนยิง DB =====
-    print("\n----- BEFORE INSERT -----")
-    print("time       :", payload[0])
-    print("deployment :", payload[1])
-    print("cpu_avg    :", payload[2])
-    print("cpu_max    :", payload[3])
-    print("mem_avg    :", payload[4])
-    print("mem_max    :", payload[5])
-    print("rps        :", payload[6])
-    print("replicas   :", payload[7])
-    print("-------------------------\n")
-    # ============================
 
     sql = """
     INSERT INTO autoscale_features
     (time, deployment, cpu_avg, cpu_max,
-     mem_avg, mem_max, rps, replicas)
+     mem_avg, mem_max, pps_rx, replicas)
 
     VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
 
@@ -164,23 +189,68 @@ def upsert(ts, dep, m):
       cpu_max = EXCLUDED.cpu_max,
       mem_avg = EXCLUDED.mem_avg,
       mem_max = EXCLUDED.mem_max,
-      rps     = EXCLUDED.rps,
+      pps_rx     = EXCLUDED.pps_rx,
       replicas= EXCLUDED.replicas
     """
 
-    cur = DB.cursor()
-    cur.execute(sql, payload)
-    DB.commit()
-    cur.close()
+    retries = 2
+
+    for attempt in range(retries):
+
+        try:
+
+            conn = get_db()
+
+            cur = conn.cursor()
+
+            cur.execute(sql, payload)
+
+            conn.commit()
+
+            cur.close()
+
+            return
+
+        except (OperationalError, InterfaceError) as e:
+
+            print("DB ERROR:", e)
+
+            try:
+                conn.rollback()
+            except:
+                pass
+
+            print("Reconnecting DB...")
+
+            global DB
+            DB = connect_db()
+
+        except Exception as e:
+
+            print("QUERY ERROR:", e)
+
+            try:
+                conn.rollback()
+            except:
+                pass
+
+            return
 
 
 # ---------- Main Loop ----------
 
 def main():
+
+    global DB
+
+    DB = connect_db()
+
     print("Starting ingest loop...")
 
     while True:
+
         try:
+
             now = datetime.now(timezone.utc)
 
             metrics = collect_all()
@@ -191,7 +261,8 @@ def main():
             print(f"[OK] {now} → {len(metrics)} deployments")
 
         except Exception as e:
-            print("ERROR:", e)
+
+            print("INGEST ERROR:", e)
 
         time.sleep(INTERVAL)
 

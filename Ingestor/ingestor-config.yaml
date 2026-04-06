@@ -5,7 +5,7 @@ metadata:
   namespace: cloud-db
 data:
   PROM_URL: "http://prometheus.monitoring:9090"
-  POLL_INTERVAL: "15"
+  POLL_INTERVAL: "1"
 
   DB_HOST: "systemdb.cloud-db.svc.cluster.local"
   DB_PORT: "5432"
