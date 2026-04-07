@@ -14,8 +14,8 @@ def load_data():
     sql = """
     SELECT *
     FROM autoscale_features
-    WHERE time >= NOW() - INTERVAL '2 minutes'
-    ORDER BY time DESC
+    WHERE time >= NOW() - INTERVAL '5 minutes'
+    ORDER BY time ASC
     """
 
     df = pd.read_sql(sql, conn)
