@@ -2,270 +2,173 @@ import os
 import time
 import requests
 import psycopg2
-
 from psycopg2 import OperationalError, InterfaceError
-
+from psycopg2.extras import execute_values  # สำคัญมากสำหรับการทำ batch insert
 from datetime import datetime, timezone
-
 
 PROM_URL = os.getenv("PROM_URL", "http://prometheus.monitoring:9090")
 INTERVAL = int(os.getenv("POLL_INTERVAL", "15"))
 
 DB = None
 
-
 # ---------- DB CONNECT ----------
 
 def connect_db():
-
     while True:
-
         try:
-
-            print("Connecting to DB...",
-                  os.getenv("DB_HOST"),
-                  os.getenv("DB_PORT"))
-
+            print(f"Connecting to DB... {os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}")
             conn = psycopg2.connect(
                 host=os.getenv("DB_HOST"),
-                port=int(os.getenv("DB_PORT")),
+                port=int(os.getenv("DB_PORT", 5432)),
                 dbname=os.getenv("DB_NAME"),
                 user=os.getenv("DB_USER"),
                 password=os.getenv("DB_PASS")
             )
-
             conn.autocommit = False
-
             print("DB CONNECTED!")
-
             return conn
-
         except Exception as e:
-
             print("DB CONNECT ERROR:", e)
             time.sleep(5)
 
-
 def get_db():
-
     global DB
-
     if DB is None or DB.closed:
-        print("DB connection closed. Reconnecting...")
         DB = connect_db()
-
     return DB
-
 
 # ---------- Prometheus Queries ----------
 
 QUERIES = {
-
-"cpu_avg": """
-avg by (owner_name) (
-  rate(container_cpu_usage_seconds_total{container!=""}[1m])
-  * on(pod, namespace) group_left(owner_name)
-  kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}
-) * 1000
-""",
-
-"cpu_max": """
-max by (owner_name) (
-  rate(container_cpu_usage_seconds_total{container!=""}[1m])
-  * on(pod, namespace) group_left(owner_name)
-  kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}
-) * 1000
-""",
-
-"mem_avg": """
-avg by (owner_name) (
-  container_memory_usage_bytes{container!=""}
-  * on(pod, namespace) group_left(owner_name)
-  kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}
-) / 1048576
-""",
-
-"mem_max": """
-max by (owner_name) (
-  container_memory_usage_bytes{container!=""}
-  * on(pod, namespace) group_left(owner_name)
-  kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}
-) / 1048576
-""",
-
-"replicas": """
-sum by (owner_name) (
-  kube_pod_status_ready
-  * on(pod, namespace) group_left(owner_name)
-  kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}
-)
-""",
-
-"pps_rx": """
-sum by (owner_name) (
-  rate(container_network_receive_packets_total{
-    interface="eth0",
-    namespace="edge-apps",
-    pod=~"ems-worker-.*"
-  }[1m])
-  * on(pod, namespace) group_left(owner_name)
-  kube_pod_owner{
-    owner_kind="ReplicaSet",
-    owner_name=~"ems-worker-.*"
-  }
-)
-"""
-
+    "cpu_avg": 'avg by (owner_name) (rate(container_cpu_usage_seconds_total{container!=""}[1m]) * on(pod, namespace) group_left(owner_name) kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}) * 1000',
+    "cpu_max": 'max by (owner_name) (rate(container_cpu_usage_seconds_total{container!=""}[1m]) * on(pod, namespace) group_left(owner_name) kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}) * 1000',
+    "mem_avg": 'avg by (owner_name) (container_memory_usage_bytes{container!=""} * on(pod, namespace) group_left(owner_name) kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}) / 1048576',
+    "mem_max": 'max by (owner_name) (container_memory_usage_bytes{container!=""} * on(pod, namespace) group_left(owner_name) kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}) / 1048576',
+    "replicas": 'sum by (owner_name) (kube_pod_status_ready * on(pod, namespace) group_left(owner_name) kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"})',
+    "pps_rx": 'sum by (owner_name) (rate(container_network_receive_packets_total{interface="eth0", pod=~"ems-worker-.*"}[1m]) * on(pod, namespace) group_left(owner_name) kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"})'
 }
 
+QUERY_MSG_COUNT = 'sum by (pod_name) (ems_message_count{namespace="edge-apps"})'
 
-# ---------- Prometheus ----------
+# ---------- Logic Helpers ----------
+
+def extract_worker_deployment(owner_name):
+    """ems-worker-edge-a-574875844c -> ems-worker-edge-a"""
+    if not owner_name: return None
+    return owner_name.rsplit("-", 1)[0]
+
+def extract_worker_name_from_producer(pod_name):
+    """ems-producer-edge-a-7db86bbf54-jgrk5 -> ems-worker-edge-a"""
+    if not pod_name: return None
+    parts = pod_name.split("-")
+    # สมมติโครงสร้างคือ ems-producer-edge-a-...
+    if len(parts) >= 4:
+        zone = f"{parts[2]}-{parts[3]}" # ได้ 'edge-a'
+        return f"ems-worker-{zone}"
+    return None
+
+# ---------- Prometheus Collector ----------
 
 def query_prom(q):
-
-    r = requests.get(
-        f"{PROM_URL}/api/v1/query",
-        params={"query": q},
-        timeout=10
-    )
-
-    r.raise_for_status()
-
-    return r.json()["data"]["result"]
-
+    try:
+        r = requests.get(f"{PROM_URL}/api/v1/query", params={"query": q}, timeout=10)
+        r.raise_for_status()
+        return r.json()["data"]["result"]
+    except Exception as e:
+        print(f"Query Error: {e}")
+        return []
 
 def collect_all():
-
     data = {}
 
+    # 1. ดึงข้อมูลฝั่ง Worker
     for key, q in QUERIES.items():
-
         result = query_prom(q)
-
         for row in result:
-
-            dep = row["metric"].get("owner_name")
-
-            if not dep:
-                continue
+            owner = row["metric"].get("owner_name")
+            dep = extract_worker_deployment(owner)
+            if not dep: continue
             
-            dep = dep.rsplit("-", 1)[0]
+            val = float(row["value"][1])
+            if dep not in data: data[dep] = {}
+            data[dep][key] = val
 
-            value = float(row["value"][1])
-
-            if dep not in data:
-                data[dep] = {}
-
-            data[dep][key] = value
-
+    # 2. ดึงข้อมูลฝั่ง Producer และ Join เข้าแถวของ Worker
+    msg_results = query_prom(QUERY_MSG_COUNT)
+    for row in msg_results:
+        pod_name = row["metric"].get("pod_name")
+        target_dep = extract_worker_name_from_producer(pod_name)
+        
+        if target_dep and target_dep in data:
+            data[target_dep]["msg_count"] = float(row["value"][1])
+            
     return data
 
+# ---------- DB UPSERT (Batch Mode) ----------
 
-# ---------- UPSERT ----------
-
-def upsert(ts, dep, m):
-
-    payload = (
-        ts,
-        dep,
-        m.get("cpu_avg"),
-        m.get("cpu_max"),
-        m.get("mem_avg"),
-        m.get("mem_max"),
-        m.get("pps_rx"),
-        int(float(m.get("replicas", 1)))
-    )
+def upsert_batch(ts, metrics_data):
+    if not metrics_data: return
+    
+    conn = get_db()
+    rows = []
+    for dep, m in metrics_data.items():
+        rows.append((
+            ts, dep,
+            m.get("cpu_avg"), m.get("cpu_max"),
+            m.get("mem_avg"), m.get("mem_max"),
+            m.get("pps_rx"), 
+            m.get("msg_count", 0), # ถ้าไม่มีข้อมูลให้เป็น 0
+            int(float(m.get("replicas", 1)))
+        ))
 
     sql = """
-    INSERT INTO autoscale_features
-    (time, deployment, cpu_avg, cpu_max,
-     mem_avg, mem_max, pps_rx, replicas)
-
-    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-
-    ON CONFLICT (time, deployment)
-    DO UPDATE SET
+    INSERT INTO autoscale_features 
+    (time, deployment, cpu_avg, cpu_max, mem_avg, mem_max, pps_rx, msg_count, replicas)
+    VALUES %s
+    ON CONFLICT (time, deployment) DO UPDATE SET
       cpu_avg = EXCLUDED.cpu_avg,
       cpu_max = EXCLUDED.cpu_max,
       mem_avg = EXCLUDED.mem_avg,
       mem_max = EXCLUDED.mem_max,
-      pps_rx     = EXCLUDED.pps_rx,
-      replicas= EXCLUDED.replicas
+      pps_rx  = EXCLUDED.pps_rx,
+      msg_count = EXCLUDED.msg_count,
+      replicas = EXCLUDED.replicas
     """
 
-    retries = 2
-
-    for attempt in range(retries):
-
-        try:
-
-            conn = get_db()
-
-            cur = conn.cursor()
-
-            cur.execute(sql, payload)
-
-            conn.commit()
-
-            cur.close()
-
-            return
-
-        except (OperationalError, InterfaceError) as e:
-
-            print("DB ERROR:", e)
-
-            try:
-                conn.rollback()
-            except:
-                pass
-
-            print("Reconnecting DB...")
-
-            global DB
-            DB = connect_db()
-
-        except Exception as e:
-
-            print("QUERY ERROR:", e)
-
-            try:
-                conn.rollback()
-            except:
-                pass
-
-            return
-
+    try:
+        cur = conn.cursor()
+        # ใช้ execute_values เพื่อยัด list 'rows' ลงไปใน SQL ทีเดียว
+        execute_values(cur, sql, rows)
+        conn.commit()
+        cur.close()
+    except (OperationalError, InterfaceError) as e:
+        print("DB Connection Error during upsert, rolling back...", e)
+        conn.rollback()
+        global DB
+        DB = None # บังคับให้ reconnect ครั้งหน้า
+    except Exception as e:
+        print("UPSERT ERROR:", e)
+        conn.rollback()
 
 # ---------- Main Loop ----------
 
 def main():
-
-    global DB
-
-    DB = connect_db()
-
     print("Starting ingest loop...")
-
     while True:
-
         try:
-
             now = datetime.now(timezone.utc)
-
             metrics = collect_all()
-
-            for dep, m in metrics.items():
-                upsert(now, dep, m)
-
-            print(f"[OK] {now} → {len(metrics)} deployments")
+            
+            if metrics:
+                upsert_batch(now, metrics)
+                print(f"[OK] {now} → Processed {len(metrics)} deployments")
+            else:
+                print(f"[WARN] {now} → No metrics found")
 
         except Exception as e:
-
-            print("INGEST ERROR:", e)
+            print("MAIN LOOP ERROR:", e)
 
         time.sleep(INTERVAL)
-
 
 if __name__ == "__main__":
     main()
