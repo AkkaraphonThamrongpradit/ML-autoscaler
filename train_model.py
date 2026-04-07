@@ -26,6 +26,7 @@ FEATURES = [
     "mem_avg",
     "mem_max",
     "pps_rx",
+    "msg_count",
     "cpu_diff",
     "pps_rx_diff",
     "cpu_acc",
@@ -57,7 +58,13 @@ for f in ["cpu_avg", "cpu_max", "mem_avg", "mem_max"]:
 # traffic → ถ้าไม่มี = 0
 df["pps_rx"] = df["pps_rx"].fillna(0)
 
+# ถ้า msg_count เป็นยอดรวมสะสมหรือยอดปัจจุบันที่หายไปบางช่วง (Interpolate)
+df["msg_count"] = df.groupby("deployment")["msg_count"].transform(
+    lambda x: x.interpolate(method="time")
+)
 
+# หรือถ้าหายไปเลยให้ถือว่าเป็น 0 (คล้าย pps_rx)
+df["msg_count"] = df["msg_count"].fillna(0)
 # replicas ไม่ใช้ train แต่เก็บไว้
 
 df["cpu_diff"] = df.groupby("deployment")["cpu_avg"].diff()

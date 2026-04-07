@@ -19,6 +19,7 @@ FEATURES = [
     "mem_avg",
     "mem_max",
     "pps_rx",
+    "msg_count",
     "cpu_diff",
     "pps_rx_diff",
     "cpu_acc",
@@ -49,15 +50,19 @@ def preprocess(df_dep: pd.DataFrame):
 
     df_dep = df_dep.copy().sort_index()
     df_dep = df_dep[~df_dep.index.duplicated()]
-
+    
     # interpolate metric
-    for f in ["cpu_avg", "cpu_max", "mem_avg", "mem_max"]:
-        df_dep[f] = df_dep.groupby("deployment")[f].transform(
-            lambda x: x.interpolate(method="time")
-        )
+    # เพิ่ม msg_count เข้าไปในลิสต์ที่ต้องทำ interpolate ด้วย
+    for f in ["cpu_avg", "cpu_max", "mem_avg", "mem_max", "msg_count"]: 
+        if f in df_dep.columns:
+            df_dep[f] = df_dep.groupby("deployment")[f].transform(
+                lambda x: x.interpolate(method="time")
+            )
 
-    # traffic
+    # traffic (ถ้า interpolate แล้วยังมี NaN ให้เติม 0)
     df_dep["pps_rx"] = df_dep["pps_rx"].fillna(0)
+    if "msg_count" in df_dep.columns:
+        df_dep["msg_count"] = df_dep["msg_count"].fillna(0)
 
     # ----- feature engineering -----
     df_dep["cpu_diff"] = df_dep.groupby("deployment")["cpu_avg"].diff()
