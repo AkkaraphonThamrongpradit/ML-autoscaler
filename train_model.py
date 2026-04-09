@@ -22,7 +22,6 @@ df = df.sort_values(["deployment", df.index.name])
 # ==================================================
 FEATURES = [
     "cpu_avg",
-    "cpu_max",
     "mem_avg",
     "mem_max",
     "pps_rx",
@@ -106,7 +105,80 @@ df["pps_rx_trend"] = df["pps_rx_trend"].bfill()
 df["cpu_std"] = df["cpu_std"].bfill()
 df["pps_rx_std"] = df["pps_rx_std"].bfill()
 
-df = df.dropna(subset=FEATURES)
+df = df.dropna(subset=FEATURES + ["cpu_max"])
+
+# ==================================================
+# FEATURE CORRELATION ANALYSIS
+# ==================================================
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+analysis_cols = FEATURES + ["cpu_max"]
+
+corr_matrix = df[analysis_cols].corr(method="pearson")
+
+print("\n===== CORRELATION MATRIX =====")
+print(corr_matrix)
+
+plt.figure(figsize=(12,8))
+sns.heatmap(
+    corr_matrix,
+    annot=True,
+    cmap="coolwarm",
+    fmt=".2f"
+)
+
+plt.title("Feature Correlation Matrix")
+plt.show()
+
+print("\n===== PER DEPLOYMENT CORRELATION =====")
+
+for dep in df["deployment"].unique():
+
+    df_dep = df[df["deployment"] == dep]
+
+    corr = df_dep[analysis_cols].corr()
+
+    print("\nDEPLOYMENT:", dep)
+    print(corr["cpu_max"].drop("cpu_max").sort_values(ascending=False))
+
+# ==================================================
+# FEATURE → TARGET CORRELATION
+# ==================================================
+
+target_corr = corr_matrix["cpu_max"].drop("cpu_max")
+
+target_corr = target_corr.sort_values(ascending=False)
+
+print("\n===== CORRELATION WITH cpu_max =====")
+print(target_corr)
+
+target_corr.plot(
+    kind="bar",
+    figsize=(10,5),
+    title="Feature Importance vs cpu_max"
+)
+
+plt.ylabel("Correlation")
+plt.show()
+
+# ==================================================
+# HIGH CORRELATION FEATURE DETECTION
+# ==================================================
+
+print("\n===== HIGHLY CORRELATED FEATURES (>0.9) =====")
+
+for i in range(len(FEATURES)):
+    for j in range(i+1, len(FEATURES)):
+
+        f1 = FEATURES[i]
+        f2 = FEATURES[j]
+
+        corr = corr_matrix.loc[f1, f2]
+
+        if abs(corr) > 0.9:
+            print(f1, "<->", f2, "=", corr)
 
 # --------------------------------------------------
 # 3) Model
