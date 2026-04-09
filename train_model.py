@@ -22,21 +22,13 @@ df = df.sort_values(["deployment", df.index.name])
 # ==================================================
 FEATURES = [
     "cpu_avg",
-    "mem_avg",
-    "mem_max",
-    "pps_rx",
     "msg_count",
-    "cpu_diff",
-    "pps_rx_diff",
-    "cpu_acc",
-    "pps_rx_acc",
-    "pps_rx_ratio",
-    "pps_rx_trend",
     "cpu_std",
-    "pps_rx_std"
+    "pps_rx",
+    "pps_rx_trend"
 ]
 
-WINDOW = 100         # -100s
+WINDOW = 200         # -200s
 PRED_STEP = 20        # ทำนาย +20s
 N_FEATURE = len(FEATURES)
 
@@ -66,44 +58,23 @@ df["msg_count"] = df.groupby("deployment")["msg_count"].transform(
 df["msg_count"] = df["msg_count"].fillna(0)
 # replicas ไม่ใช้ train แต่เก็บไว้
 
-df["cpu_diff"] = df.groupby("deployment")["cpu_avg"].diff()
-df["cpu_acc"] = df.groupby("deployment")["cpu_diff"].diff()
-
-df["pps_rx_diff"] = df.groupby("deployment")["pps_rx"].diff()
-df["pps_rx_acc"] = df.groupby("deployment")["pps_rx_diff"].diff()
-
-df["pps_rx_ratio"] = df["pps_rx"] / (df.groupby("deployment")["pps_rx"].shift(1) + 1)
 
 df["pps_rx_trend"] = (
     df.groupby("deployment")["pps_rx"]
-    .rolling(12, min_periods=1)
+    .rolling(60, min_periods=1)
     .mean()
     .reset_index(level=0, drop=True)
 )
 
 df["cpu_std"] = (
     df.groupby("deployment")["cpu_avg"]
-    .rolling(12, min_periods=1)
+    .rolling(60, min_periods=1)
     .std()
     .reset_index(level=0, drop=True)
 )
 
-df["pps_rx_std"] = (
-    df.groupby("deployment")["pps_rx"]
-    .rolling(12, min_periods=1)
-    .std()
-    .reset_index(level=0, drop=True)
-)
-
-df["pps_rx_diff"] = df["pps_rx_diff"].interpolate(method="time")
-df["pps_rx_diff"] = df["pps_rx_diff"].fillna(0)
-df["pps_rx_acc"] = df["pps_rx_acc"].interpolate(method="time")
-df["pps_rx_acc"] = df["pps_rx_acc"].fillna(0)
-df["pps_rx_ratio"] = df["pps_rx_ratio"].replace([np.inf, -np.inf], np.nan)
-df["pps_rx_ratio"] = df["pps_rx_ratio"].fillna(1)
 df["pps_rx_trend"] = df["pps_rx_trend"].bfill()
-df["cpu_std"] = df["cpu_std"].bfill()
-df["pps_rx_std"] = df["pps_rx_std"].bfill()
+df["cpu_std"] = df["cpu_std"].fillna(0)
 
 df = df.dropna(subset=FEATURES + ["cpu_max"])
 
@@ -237,12 +208,11 @@ y_train_global = []
 X_test_global = []
 y_test_global = []
 
-for dep in deployments:
+for dep, df_dep in df.groupby("deployment"):
 
     print("\nCollecting data from:", dep)
-
-    df_dep = df[df["deployment"] == dep]
-
+    print("Data points:", len(df_dep))
+    print("Time range:", df_dep.index.min(), "to", df_dep.index.max())
     # แยก train/test ตามเวลา
     split_time = df_dep.index.to_series().quantile(0.8)
 
@@ -341,7 +311,7 @@ history = model.fit(
     validation_data=(X_test, y_test),
     epochs=70,
     batch_size=64,
-    shuffle=True,
+    shuffle=False,
     callbacks=[
         keras.callbacks.EarlyStopping(
             patience=8,
@@ -356,7 +326,39 @@ history = model.fit(
     ]
 )
 
+# --------------------------------------------------
+# training history
+# --------------------------------------------------
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(8,5))
+
+plt.plot(history.history["loss"])
+plt.plot(history.history["val_loss"])
+
+plt.legend(["train","validation"])
+plt.title("Training vs Validation Loss")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+
+plt.show()
+
 loss, mae = model.evaluate(X_test, y_test)
+
+# --------------------------------------------------
+# prediction vs true
+# --------------------------------------------------
+
+y_pred = model.predict(X_test)
+
+plt.figure(figsize=(6,6))
+plt.scatter(y_test, y_pred, alpha=0.3)
+
+plt.xlabel("True CPU")
+plt.ylabel("Predicted CPU")
+plt.title("Prediction vs True CPU")
+
+plt.show()
 
 print("\nGLOBAL MAE:", mae)
 
