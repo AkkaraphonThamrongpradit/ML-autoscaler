@@ -68,13 +68,13 @@ def preprocess(df_dep: pd.DataFrame):
     # --------------------------------------------------
     df_dep["pps_rx_trend"] = (
         df_dep["pps_rx"]
-        .rolling(60, min_periods=1)
+        .rolling(10, min_periods=1)
         .mean()
     )
 
     df_dep["cpu_std"] = (
         df_dep["cpu_avg"]
-        .rolling(60, min_periods=1)
+        .rolling(10, min_periods=1)
         .std()
     )
 

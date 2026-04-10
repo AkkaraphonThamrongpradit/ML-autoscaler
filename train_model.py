@@ -5,7 +5,7 @@ import joblib
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv1D, Dense, GlobalMaxPooling1D
+from tensorflow.keras.layers import Conv1D, Dense, GlobalAveragePooling1D
 from sklearn.preprocessing import RobustScaler
 
 
@@ -61,14 +61,14 @@ df["msg_count"] = df["msg_count"].fillna(0)
 
 df["pps_rx_trend"] = (
     df.groupby("deployment")["pps_rx"]
-    .rolling(60, min_periods=1)
+    .rolling(10, min_periods=1)
     .mean()
     .reset_index(level=0, drop=True)
 )
 
 df["cpu_std"] = (
     df.groupby("deployment")["cpu_avg"]
-    .rolling(60, min_periods=1)
+    .rolling(10, min_periods=1)
     .std()
     .reset_index(level=0, drop=True)
 )
@@ -163,7 +163,7 @@ model = Sequential([
 
     Conv1D(32, 3, padding="causal", dilation_rate=8, activation="relu"),
 
-    GlobalMaxPooling1D(),
+    GlobalAveragePooling1D(),
 
     Dense(64, activation="relu"),
     Dense(1)
