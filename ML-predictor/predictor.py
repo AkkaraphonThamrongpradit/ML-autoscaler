@@ -15,22 +15,13 @@ app = Flask(__name__)
 # ===== ต้องตรง TRAIN =====
 FEATURES = [
     "cpu_avg",
-    "cpu_max",
-    "mem_avg",
-    "mem_max",
-    "pps_rx",
     "msg_count",
-    "cpu_diff",
-    "pps_rx_diff",
-    "cpu_acc",
-    "pps_rx_acc",
-    "pps_rx_ratio",
-    "pps_rx_trend",
     "cpu_std",
-    "pps_rx_std"
+    "pps_rx",
+    "pps_rx_trend"
 ]
 
-WINDOW = 100         # -100s
+WINDOW = 200         # -200s
 GAP_THRESHOLD = "5s"
 # =========================
 
@@ -49,71 +40,54 @@ latest_predictions = {}
 def preprocess(df_dep: pd.DataFrame):
 
     df_dep = df_dep.copy().sort_index()
-    df_dep = df_dep[~df_dep.index.duplicated()]
-    
-    # interpolate metric
-    # เพิ่ม msg_count เข้าไปในลิสต์ที่ต้องทำ interpolate ด้วย
-    for f in ["cpu_avg", "cpu_max", "mem_avg", "mem_max", "msg_count"]: 
-        if f in df_dep.columns:
-            df_dep[f] = df_dep.groupby("deployment")[f].transform(
-                lambda x: x.interpolate(method="time")
-            )
 
-    # traffic (ถ้า interpolate แล้วยังมี NaN ให้เติม 0)
-    df_dep["pps_rx"] = df_dep["pps_rx"].fillna(0)
-    if "msg_count" in df_dep.columns:
-        df_dep["msg_count"] = df_dep["msg_count"].fillna(0)
-
-    # ----- feature engineering -----
-    df_dep["cpu_diff"] = df_dep.groupby("deployment")["cpu_avg"].diff()
-    df_dep["cpu_acc"] = df_dep.groupby("deployment")["cpu_diff"].diff()
-
-    df_dep["pps_rx_diff"] = df_dep.groupby("deployment")["pps_rx"].diff()
-    df_dep["pps_rx_acc"] = df_dep.groupby("deployment")["pps_rx_diff"].diff()
-
-    df_dep["pps_rx_ratio"] = df_dep["pps_rx"] / (df_dep.groupby("deployment")["pps_rx"].shift(1) + 1)
-
-    df_dep["pps_rx_trend"] = (
-        df_dep.groupby("deployment")["pps_rx"]
-        .rolling(12, min_periods=1)
-        .mean()
-        .reset_index(level=0, drop=True)
-    )
-
-    df_dep["cpu_std"] = (
-        df_dep.groupby("deployment")["cpu_avg"]
-        .rolling(12, min_periods=1)
-        .std()
-        .reset_index(level=0, drop=True)
-    )
-
-    df_dep["pps_rx_std"] = (
-        df_dep.groupby("deployment")["pps_rx"]
-        .rolling(12, min_periods=1)
-        .std()
-        .reset_index(level=0, drop=True)
-    )
-
-    df_dep["cpu_diff"] = df_dep["cpu_diff"].interpolate(method="time")
-    df_dep["pps_rx_diff"] = df_dep["pps_rx_diff"].interpolate(method="time")
-    df_dep["cpu_acc"] =  df_dep["cpu_acc"].interpolate(method="time")
-    df_dep["pps_rx_acc"] = df_dep["pps_rx_acc"].interpolate(method="time")
-    
-    df_dep["cpu_diff"] = df_dep["cpu_diff"].fillna(0)
-    df_dep["pps_rx_diff"] = df_dep["pps_rx_diff"].fillna(0)
-    df_dep["cpu_acc"] =  df_dep["cpu_acc"].fillna(0)
-    df_dep["pps_rx_acc"] = df_dep["pps_rx_acc"].fillna(0)
-
-    df_dep["pps_rx_ratio"] = df_dep["pps_rx_ratio"].replace([np.inf, -np.inf], np.nan)
-    df_dep["pps_rx_ratio"] = df_dep["pps_rx_ratio"].fillna(1)
-
-    df_dep["pps_rx_trend"] = df_dep["pps_rx_trend"].bfill()
-    df_dep["cpu_std"] = df_dep["cpu_std"].bfill()
-    df_dep["pps_rx_std"] = df_dep["pps_rx_std"].bfill()
-
+    # --------------------------------------------------
+    # 1) กัน column หาย (สำคัญมาก)
+    # --------------------------------------------------
     for f in FEATURES:
         if f not in df_dep.columns:
             df_dep[f] = 0
+
+    # --------------------------------------------------
+    # 2) interpolate metric (เหมือน train)
+    # --------------------------------------------------
+    for f in ["cpu_avg", "cpu_max", "mem_avg", "mem_max"]:
+        if f in df_dep.columns:
+            df_dep[f] = df_dep[f].interpolate(method="time", limit=5)
+
+    # --------------------------------------------------
+    # 3) traffic + msg_count
+    # --------------------------------------------------
+    df_dep["pps_rx"] = df_dep["pps_rx"].fillna(0)
+
+    df_dep["msg_count"] = df_dep["msg_count"].interpolate(method="time")
+    df_dep["msg_count"] = df_dep["msg_count"].fillna(0)
+
+    # --------------------------------------------------
+    # 4) feature engineering (ต้องเหมือน train 100%)
+    # --------------------------------------------------
+    df_dep["pps_rx_trend"] = (
+        df_dep["pps_rx"]
+        .rolling(60, min_periods=1)
+        .mean()
+    )
+
+    df_dep["cpu_std"] = (
+        df_dep["cpu_avg"]
+        .rolling(60, min_periods=1)
+        .std()
+    )
+
+    # --------------------------------------------------
+    # 5) clean NaN
+    # --------------------------------------------------
+    df_dep["pps_rx_trend"] = df_dep["pps_rx_trend"].bfill()
+    df_dep["cpu_std"] = df_dep["cpu_std"].fillna(0)
+
+    # --------------------------------------------------
+    # 6) ensure ไม่มี NaN ใน FEATURES
+    # --------------------------------------------------
+    df_dep = df_dep.dropna(subset=FEATURES)
 
     return df_dep
 
@@ -134,16 +108,16 @@ def is_continuous(df_dep):
 
 def predict_for_deployment(df_dep):
 
-    df_dep = preprocess(df_dep)
+    assert df_dep["deployment"].nunique() == 1
 
-    # ----- เช็คความต่อเนื่อง -----
     if not is_continuous(df_dep):
         raise ValueError("data not continuous")
+    
+    df_dep = preprocess(df_dep)
 
     # เอา WINDOW ล่าสุด
     df_dep = df_dep.tail(WINDOW)
 
-    df_dep = df_dep.dropna(subset=FEATURES)
     if len(df_dep) < WINDOW:
         raise ValueError("not enough data after cleaning")
     
@@ -151,18 +125,20 @@ def predict_for_deployment(df_dep):
     data = df_dep[FEATURES].values
     if np.isnan(data).any():
         raise ValueError("nan in features")
-    scaled = x_scaler.transform(data)
+    scaled = x_scaler.transform(
+        data.reshape(-1, len(FEATURES))
+    )
 
     seq = scaled.reshape(1, WINDOW, len(FEATURES))
 
     # ----- predict -----
-    pred = model(seq, training=False).numpy()[0][0]
+    pred = model.predict(seq, verbose=0)[0][0]
     pred = float(pred)
 
     # model output = scaled cpu_peak
     cpu_pred = y_scaler.inverse_transform([[pred]])[0][0]
 
-    cpu_pred = max(0, cpu_pred)
+    cpu_pred = np.clip(cpu_pred, 0, 500) # adjust based on system
 
     return {
         "cpu_pred_peak": cpu_pred
@@ -214,7 +190,7 @@ def metrics():
         last_seen_data_ts[dep] = current_max_ts
 
         try:
-            if len(df_dep) < 2:
+            if len(df_dep) < WINDOW:
                 continue
 
             p = predict_for_deployment(df_dep)
@@ -228,6 +204,7 @@ def metrics():
         except Exception as e:
             print("Predict error:", dep, e)
             latest_predictions[dep] = {
+                "pred_cpu_peak": 0,
                 "pred_error": 1
             }
             continue
