@@ -4,8 +4,8 @@ import psycopg2
 def load_data():
 
     conn = psycopg2.connect(
-        host="13.250.203.51",
-        port=30086,
+        host="10.96.136.61",
+        port=5432,
         dbname="autoscale-db",
         user="admin",
         password="admin123"
