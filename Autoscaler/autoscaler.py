@@ -244,8 +244,8 @@ while True:
             UT = UT_max - (lat / L_max) * (UT_max - UT_min)
             LT = max(UT_min * 0.5, UT - K_HYSTERESIS * cpu_sd)
 
-            print(f"[DEBUG] {dep} | UT={UT:.2f}, LT={LT:.2f}, Lat={avg_latency:.3f}")
-            
+            print(f"[DEBUG] {dep} | UT={UT:.2f}, LT={LT:.2f}, Lat={avg_latency:.3f}, SD={cpu_sd:.2f}")
+
             if pred_error == 1:
                 target_cpu = cpu_actual
                 mode = "FALLBACK"
