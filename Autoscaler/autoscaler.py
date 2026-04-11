@@ -74,7 +74,7 @@ def query_prometheus(query):
         results = {}
 
         # กำหนด label names ที่เราสนใจ
-        target_labels = ["deployment", "pod", "owner_name"]
+        target_labels = ["deployment", "pod_name", "owner_name"]
 
         for item in data["data"]["result"]:
             metric = item["metric"]
