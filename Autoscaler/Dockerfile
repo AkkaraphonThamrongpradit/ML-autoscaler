@@ -10,4 +10,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY autoscaler.py .
 
 # run app
-CMD ["python", "autoscaler.py"]
+CMD ["python", "-u", "autoscaler.py"]
