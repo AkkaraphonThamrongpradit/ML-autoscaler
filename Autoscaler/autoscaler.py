@@ -32,11 +32,10 @@ SCALE_DOWN_COOLDOWN = 60
 LOOP_INTERVAL = 5
 
 K_HYSTERESIS = 1.5   # k คงที่
-CPU_REQUEST_PER_POD = 350   # millicore
 
-HISTORY_LENGTH = 10  # ใช้เก็บ CPU prediction history เพื่อ std
-
-SLO_LATENCY = 0.5  # latency/item 
+UT_max = 500
+UT_min = 350
+L_max = 60
 
 # =========================
 # KUBERNETES CLIENT
@@ -232,18 +231,18 @@ while True:
             avg_latency = row['latency']
             pred_error = row['pred_error']
 
-            if avg_latency <= 0 or np.isnan(avg_latency):
-                print(f"[{dep}] Invalid latency, skip")
-                continue
+            if avg_latency is None or np.isnan(avg_latency):
+                print(f"[{dep}] No latency → fallback")
+                avg_latency = L_max  # worst case → force scale up tendency
             
             s = get_state(dep)
             current_replicas = get_current_replicas(dep)
             if current_replicas is None: continue
 
             # 2. Compute Thresholds (Safety: ป้องกัน UT เป็น 0)
-            ut_factor = (SLO_LATENCY / avg_latency) if avg_latency > 0 else 1.0
-            UT = max(1.0, CPU_REQUEST_PER_POD * ut_factor) # อย่างน้อยต้องเป็น 1 เพื่อไม่ให้หาร 0
-            LT = max(0, UT - K_HYSTERESIS * cpu_sd)
+            lat = min(avg_latency, L_max)  # clamp
+            UT = UT_max - (lat / L_max) * (UT_max - UT_min)
+            LT = max(UT_min * 0.5, UT - K_HYSTERESIS * cpu_sd)
 
             if pred_error == 1:
                 target_cpu = cpu_actual
