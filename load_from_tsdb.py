@@ -11,7 +11,7 @@ def load_data():
     )
 
     sql = """
-    SELECT time, deployment, cpu_avg, cpu_max, mem_avg, mem_max, pps_rx, replicas, msg_count
+    SELECT time, deployment, cpu_avg, cpu_max, mem_avg, mem_max, pps_rx, replicas, msg_count, mps
     FROM autoscale_features
     ORDER BY time ASC
     """

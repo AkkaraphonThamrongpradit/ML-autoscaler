@@ -16,6 +16,9 @@ app = Flask(__name__)
 FEATURES = [
     "cpu_avg",
     "msg_count",
+    "mps",            
+    "mps_trend",      
+    "mps_std",        
     "cpu_std",
     "pps_rx",
     "pps_rx_trend"
@@ -41,6 +44,8 @@ def preprocess(df_dep: pd.DataFrame):
 
     df_dep = df_dep.copy().sort_index()
 
+    if "mps" not in df_dep.columns:
+        df_dep["mps"] = np.nan
     # --------------------------------------------------
     # 1) กัน column หาย (สำคัญมาก)
     # --------------------------------------------------
@@ -54,7 +59,7 @@ def preprocess(df_dep: pd.DataFrame):
     for f in ["cpu_avg", "cpu_max", "mem_avg", "mem_max"]:
         if f in df_dep.columns:
             df_dep[f] = df_dep[f].interpolate(method="time", limit=5)
-
+    
     # --------------------------------------------------
     # 3) traffic + msg_count
     # --------------------------------------------------
@@ -62,6 +67,9 @@ def preprocess(df_dep: pd.DataFrame):
 
     df_dep["msg_count"] = df_dep["msg_count"].interpolate(method="time")
     df_dep["msg_count"] = df_dep["msg_count"].fillna(0)
+
+    df_dep["mps"] = df_dep["mps"].interpolate(method="time")
+    df_dep["mps"] = df_dep["mps"].fillna(0)
 
     # --------------------------------------------------
     # 4) feature engineering (ต้องเหมือน train 100%)
@@ -77,12 +85,29 @@ def preprocess(df_dep: pd.DataFrame):
         .rolling(10, min_periods=1)
         .std()
     )
+    
+    # mps trend
+    df_dep["mps_trend"] = (
+        df_dep["mps"]
+        .rolling(10, min_periods=1)
+        .mean()
+    )
+
+    # mps std
+    df_dep["mps_std"] = (
+        df_dep["mps"]
+        .rolling(10, min_periods=1)
+        .std()
+    )
+
 
     # --------------------------------------------------
     # 5) clean NaN
     # --------------------------------------------------
     df_dep["pps_rx_trend"] = df_dep["pps_rx_trend"].bfill()
     df_dep["cpu_std"] = df_dep["cpu_std"].fillna(0)
+    df_dep["mps_trend"] = df_dep["mps_trend"].bfill()
+    df_dep["mps_std"] = df_dep["mps_std"].fillna(0)
 
     # --------------------------------------------------
     # 6) ensure ไม่มี NaN ใน FEATURES

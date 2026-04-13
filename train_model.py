@@ -23,6 +23,9 @@ df = df.sort_values(["deployment", df.index.name])
 FEATURES = [
     "cpu_avg",
     "msg_count",
+    "mps",
+    "mps_trend",
+    "mps_std",     
     "cpu_std",
     "pps_rx",
     "pps_rx_trend"
@@ -58,6 +61,11 @@ df["msg_count"] = df.groupby("deployment")["msg_count"].transform(
 df["msg_count"] = df["msg_count"].fillna(0)
 # replicas ไม่ใช้ train แต่เก็บไว้
 
+df["mps"] = df.groupby("deployment")["mps"].transform(
+    lambda x: x.interpolate(method="time")
+)
+
+df["mps"] = df["mps"].fillna(0)
 
 df["pps_rx_trend"] = (
     df.groupby("deployment")["pps_rx"]
@@ -72,7 +80,24 @@ df["cpu_std"] = (
     .std()
     .reset_index(level=0, drop=True)
 )
+# trend ของ mps
+df["mps_trend"] = (
+    df.groupby("deployment")["mps"]
+    .rolling(10, min_periods=1)
+    .mean()
+    .reset_index(level=0, drop=True)
+)
 
+# volatility ของ mps
+df["mps_std"] = (
+    df.groupby("deployment")["mps"]
+    .rolling(10, min_periods=1)
+    .std()
+    .reset_index(level=0, drop=True)
+)
+
+df["mps_trend"] = df["mps_trend"].bfill()
+df["mps_std"] = df["mps_std"].fillna(0)
 df["pps_rx_trend"] = df["pps_rx_trend"].bfill()
 df["cpu_std"] = df["cpu_std"].fillna(0)
 
