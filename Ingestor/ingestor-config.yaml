@@ -4,7 +4,7 @@ metadata:
   name: autoscale-ingestor-config
   namespace: cloud-db
 data:
-  PROM_URL: "http://10.96.136.61:5432"
+  PROM_URL: "http://10.96.87.31:80"
   POLL_INTERVAL: "1"
 
   DB_HOST: "systemdb.cloud-db.svc.cluster.local"
