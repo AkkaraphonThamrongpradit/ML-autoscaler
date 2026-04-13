@@ -19,6 +19,7 @@ QUERY_CPU_ACTUAL = 'max by (owner_name) (rate(container_cpu_usage_seconds_total{
 QUERY_CPU_SD = 'stddev_over_time(max by (owner_name) (rate(container_cpu_usage_seconds_total{container!=""}[1m])* on(pod, namespace) group_left(owner_name)kube_pod_owner{owner_kind="ReplicaSet", owner_name=~"ems-worker-.*"}* 1000)[3m:10s])'
 #pod_name
 QUERY_LATENCY = 'sum by (pod_name) (ems_total_time_seconds{namespace="edge-apps"})'
+QUERY_MSG_COUNT = 'sum by (pod_name) (ems_message_count{namespace="edge-apps"})'
 
 NAMESPACE = "edge-apps"
 
@@ -36,6 +37,7 @@ K_HYSTERESIS = 1.5   # k คงที่
 UT_max = 500
 UT_min = 350
 L_max = 60
+MSG_MAX = 3000
 
 # =========================
 # KUBERNETES CLIENT
@@ -148,6 +150,20 @@ def normalize_latency_metrics(raw_dict):
     result = {dep: np.mean(values) for dep, values in temp.items()}
     return result
 
+def normalize_msg_metrics(raw_dict):
+    temp = {}
+
+    for pod_name, value in raw_dict.items():
+        dep = extract_worker_name_from_producer(pod_name)
+        if not dep:
+            continue
+
+        temp.setdefault(dep, []).append(value)
+
+    # ใช้ sum หรือ mean → เลือกตาม behavior
+    result = {dep: np.sum(values) for dep, values in temp.items()}
+    return result
+
 
 # =========================
 # GET CURRENT REPLICAS
@@ -190,11 +206,13 @@ while True:
         cpu_actual_raw = query_prometheus(QUERY_CPU_ACTUAL)
         cpu_sd_raw = query_prometheus(QUERY_CPU_SD)
         latency_raw = query_prometheus(QUERY_LATENCY)
+        msg_raw = query_prometheus(QUERY_MSG_COUNT)
 
         # 🔥 normalize
         cpu_actual = normalize_owner_metrics(cpu_actual_raw)
         cpu_sd = normalize_owner_metrics(cpu_sd_raw)
         latency = normalize_latency_metrics(latency_raw)
+        msg_count = normalize_msg_metrics(msg_raw)
 
         # รวมเป็น DataFrame
         # รวม key ของ deployment ทั้งหมด
@@ -209,12 +227,13 @@ while True:
                 "cpu_actual": cpu_actual.get(dep, np.nan),
                 "cpu_sd": cpu_sd.get(dep, 0),
                 "latency": latency.get(dep, np.nan),
+                "msg_count": msg_count.get(dep, np.nan),
             })
 
         df = pd.DataFrame(rows).set_index("deployment")
 
         # 🔥 filter เฉพาะข้อมูลที่ใช้ได้
-        df = df.dropna(subset=["cpu_pred", "cpu_actual"])
+        df = df.dropna(subset=["cpu_pred", "cpu_actual", "msg_count"])
 
         if df.empty:
             print("No data from Prometheus. Waiting...")
@@ -230,18 +249,23 @@ while True:
             cpu_sd = row['cpu_sd']
             avg_latency = row['latency']
             pred_error = row['pred_error']
+            msg = row['msg_count']
 
             if avg_latency is None or np.isnan(avg_latency):
                 print(f"[{dep}] No latency → fallback")
                 avg_latency = L_max  # worst case → force scale up tendency
             
+            if msg is None or np.isnan(msg):
+                print(f"[{dep}] No msg_count → fallback")
+                msg = 0
+
             s = get_state(dep)
             current_replicas = get_current_replicas(dep)
             if current_replicas is None: continue
 
             # 2. Compute Thresholds (Safety: ป้องกัน UT เป็น 0)
-            lat = min(avg_latency, L_max)  # clamp
-            UT = UT_max - (lat / L_max) * (UT_max - UT_min)
+            load_ratio = min(msg / MSG_MAX, 1.0)
+            UT = UT_max - load_ratio * (UT_max - UT_min)
             LT = max(UT_min * 0.5, UT - K_HYSTERESIS * cpu_sd)
 
             print(f"[DEBUG] {dep} | UT={UT:.2f}, LT={LT:.2f}, Lat={avg_latency:.3f}, SD={cpu_sd:.2f}")
