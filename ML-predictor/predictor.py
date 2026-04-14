@@ -20,8 +20,7 @@ FEATURES = [
     "mps_trend",      
     "mps_std",        
     "cpu_std",
-    "pps_rx",
-    "pps_rx_trend"
+    "pps_rx"
 ]
 
 WINDOW = 200         # -200s
@@ -74,12 +73,6 @@ def preprocess(df_dep: pd.DataFrame):
     # --------------------------------------------------
     # 4) feature engineering (ต้องเหมือน train 100%)
     # --------------------------------------------------
-    df_dep["pps_rx_trend"] = (
-        df_dep["pps_rx"]
-        .rolling(10, min_periods=1)
-        .mean()
-    )
-
     df_dep["cpu_std"] = (
         df_dep["cpu_avg"]
         .rolling(10, min_periods=1)
@@ -104,7 +97,6 @@ def preprocess(df_dep: pd.DataFrame):
     # --------------------------------------------------
     # 5) clean NaN
     # --------------------------------------------------
-    df_dep["pps_rx_trend"] = df_dep["pps_rx_trend"].bfill()
     df_dep["cpu_std"] = df_dep["cpu_std"].fillna(0)
     df_dep["mps_trend"] = df_dep["mps_trend"].bfill()
     df_dep["mps_std"] = df_dep["mps_std"].fillna(0)

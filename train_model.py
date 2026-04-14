@@ -16,6 +16,7 @@ print("Loading data from TSDB...")
 df = load_data()
 df = df.sort_index()
 df = df.sort_values(["deployment", df.index.name])
+df = df[df["mps"].notna()]
 
 # ==================================================
 # CONFIG
@@ -27,8 +28,7 @@ FEATURES = [
     "mps_trend",
     "mps_std",     
     "cpu_std",
-    "pps_rx",
-    "pps_rx_trend"
+    "pps_rx"
 ]
 
 WINDOW = 200         # -200s
@@ -67,13 +67,6 @@ df["mps"] = df.groupby("deployment")["mps"].transform(
 
 df["mps"] = df["mps"].fillna(0)
 
-df["pps_rx_trend"] = (
-    df.groupby("deployment")["pps_rx"]
-    .rolling(10, min_periods=1)
-    .mean()
-    .reset_index(level=0, drop=True)
-)
-
 df["cpu_std"] = (
     df.groupby("deployment")["cpu_avg"]
     .rolling(10, min_periods=1)
@@ -98,7 +91,6 @@ df["mps_std"] = (
 
 df["mps_trend"] = df["mps_trend"].bfill()
 df["mps_std"] = df["mps_std"].fillna(0)
-df["pps_rx_trend"] = df["pps_rx_trend"].bfill()
 df["cpu_std"] = df["cpu_std"].fillna(0)
 
 df = df.dropna(subset=FEATURES + ["cpu_max"])
