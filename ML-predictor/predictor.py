@@ -16,8 +16,7 @@ app = Flask(__name__)
 FEATURES = [
     "cpu_avg",
     "msg_count",
-    "mps",            
-    "mps_trend",      
+    "mps",                 
     "mps_std",        
     "cpu_std",
     "pps_rx"
@@ -79,13 +78,6 @@ def preprocess(df_dep: pd.DataFrame):
         .std()
     )
     
-    # mps trend
-    df_dep["mps_trend"] = (
-        df_dep["mps"]
-        .rolling(10, min_periods=1)
-        .mean()
-    )
-
     # mps std
     df_dep["mps_std"] = (
         df_dep["mps"]
@@ -98,7 +90,6 @@ def preprocess(df_dep: pd.DataFrame):
     # 5) clean NaN
     # --------------------------------------------------
     df_dep["cpu_std"] = df_dep["cpu_std"].fillna(0)
-    df_dep["mps_trend"] = df_dep["mps_trend"].bfill()
     df_dep["mps_std"] = df_dep["mps_std"].fillna(0)
 
     # --------------------------------------------------

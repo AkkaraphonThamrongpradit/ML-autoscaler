@@ -25,7 +25,6 @@ FEATURES = [
     "cpu_avg",
     "msg_count",
     "mps",
-    "mps_trend",
     "mps_std",     
     "cpu_std",
     "pps_rx"
@@ -73,13 +72,6 @@ df["cpu_std"] = (
     .std()
     .reset_index(level=0, drop=True)
 )
-# trend ของ mps
-df["mps_trend"] = (
-    df.groupby("deployment")["mps"]
-    .rolling(10, min_periods=1)
-    .mean()
-    .reset_index(level=0, drop=True)
-)
 
 # volatility ของ mps
 df["mps_std"] = (
@@ -89,7 +81,6 @@ df["mps_std"] = (
     .reset_index(level=0, drop=True)
 )
 
-df["mps_trend"] = df["mps_trend"].bfill()
 df["mps_std"] = df["mps_std"].fillna(0)
 df["cpu_std"] = df["cpu_std"].fillna(0)
 
