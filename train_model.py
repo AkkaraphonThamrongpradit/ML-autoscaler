@@ -16,7 +16,6 @@ print("Loading data from TSDB...")
 df = load_data()
 df = df.sort_index()
 df = df.sort_values(["deployment", df.index.name])
-df = df[df["mps"].notna()]
 
 # ==================================================
 # CONFIG
@@ -68,7 +67,7 @@ df["mps"] = df["mps"].fillna(0)
 
 df["cpu_std"] = (
     df.groupby("deployment")["cpu_avg"]
-    .rolling(10, min_periods=1)
+    .rolling(60, min_periods=1)
     .std()
     .reset_index(level=0, drop=True)
 )
@@ -76,7 +75,7 @@ df["cpu_std"] = (
 # volatility ของ mps
 df["mps_std"] = (
     df.groupby("deployment")["mps"]
-    .rolling(10, min_periods=1)
+    .rolling(60, min_periods=1)
     .std()
     .reset_index(level=0, drop=True)
 )

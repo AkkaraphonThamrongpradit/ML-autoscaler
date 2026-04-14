@@ -13,6 +13,7 @@ def load_data():
     sql = """
     SELECT time, deployment, cpu_avg, cpu_max, mem_avg, mem_max, pps_rx, replicas, msg_count, mps
     FROM autoscale_features
+    WHERE time >= '2026-04-13 16:52:53.092635+00:00'
     ORDER BY time ASC
     """
 

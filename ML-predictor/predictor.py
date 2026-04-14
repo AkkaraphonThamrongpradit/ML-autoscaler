@@ -74,14 +74,14 @@ def preprocess(df_dep: pd.DataFrame):
     # --------------------------------------------------
     df_dep["cpu_std"] = (
         df_dep["cpu_avg"]
-        .rolling(10, min_periods=1)
+        .rolling(60, min_periods=1)
         .std()
     )
     
     # mps std
     df_dep["mps_std"] = (
         df_dep["mps"]
-        .rolling(10, min_periods=1)
+        .rolling(60, min_periods=1)
         .std()
     )
 
