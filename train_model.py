@@ -21,7 +21,6 @@ df = df.sort_values(["deployment", df.index.name])
 # CONFIG
 # ==================================================
 FEATURES = [
-    "cpu_avg",
     "msg_count",
     "mps",
     "mps_std",     
@@ -29,8 +28,8 @@ FEATURES = [
     "pps_rx"
 ]
 
-WINDOW = 200         # -200s
-PRED_STEP = 50        # ทำนาย +50s
+WINDOW = 120         # -120s
+PRED_STEP = 30        # ทำนาย +30s
 N_FEATURE = len(FEATURES)
 
 GAP_THRESHOLD = "5s"   
@@ -178,7 +177,7 @@ model = Sequential([
 
 model.compile(
     optimizer=keras.optimizers.Adam(learning_rate=0.001, clipnorm=1.0),
-    loss=tf.keras.losses.Huber(delta=0.1),
+    loss=tf.keras.losses.Huber(delta=0.5),
     metrics=["mae"]
 )
 

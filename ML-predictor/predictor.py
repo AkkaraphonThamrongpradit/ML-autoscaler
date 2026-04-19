@@ -14,7 +14,6 @@ app = Flask(__name__)
 
 # ===== ต้องตรง TRAIN =====
 FEATURES = [
-    "cpu_avg",
     "msg_count",
     "mps",                 
     "mps_std",        
@@ -22,7 +21,7 @@ FEATURES = [
     "pps_rx"
 ]
 
-WINDOW = 200         # -200s
+WINDOW = 120         # -120s
 GAP_THRESHOLD = "5s"
 # =========================
 
