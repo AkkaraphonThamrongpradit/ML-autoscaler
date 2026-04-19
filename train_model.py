@@ -28,8 +28,8 @@ FEATURES = [
     "pps_rx"
 ]
 
-WINDOW = 120         # -120s
-PRED_STEP = 30        # ทำนาย +30s
+WINDOW = 200         # -200s
+PRED_STEP = 50        # ทำนาย +50s
 N_FEATURE = len(FEATURES)
 
 GAP_THRESHOLD = "5s"   

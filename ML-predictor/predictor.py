@@ -21,7 +21,7 @@ FEATURES = [
     "pps_rx"
 ]
 
-WINDOW = 120         # -120s
+WINDOW = 200         # -200s
 GAP_THRESHOLD = "5s"
 # =========================
 
