@@ -20,6 +20,7 @@ QUERY_CPU_SD = 'stddev_over_time(max by (owner_name) (rate(container_cpu_usage_s
 #pod_name
 QUERY_LATENCY = 'sum by (pod_name) (ems_total_time_seconds{namespace="edge-apps"})'
 QUERY_MSG_COUNT = 'sum by (pod_name) (ems_message_count{namespace="edge-apps"})'
+QUERY_MPS_STD = 'avg by (pod_name) (stddev_over_time(pdc_realtime_mps{namespace="edge-apps"}[60s]))'
 
 NAMESPACE = "edge-apps"
 
@@ -35,10 +36,10 @@ LOOP_INTERVAL = 5
 K_HYSTERESIS = 1.5   # k คงที่
 
 UT_max = 500
-UT_min = 350
+UT_min = 300
 L_max = 60
-MSG_MAX = 3000
-
+#MSG_MAX = 3000
+MPS_STD_MAX = 100
 # =========================
 # KUBERNETES CLIENT
 # =========================
@@ -124,6 +125,34 @@ def extract_worker_name_from_producer(pod_name):
     
     return None
 
+def extract_worker_name_from_pdc(pod_name):
+    """
+    pdc-edge-a-d7955b489-59fm5 -> ems-worker-edge-a
+    """
+    if not pod_name:
+        return None
+
+    parts = pod_name.split("-")
+
+    # pdc-edge-a-xxxxx-xxxxx
+    if len(parts) >= 3:
+        zone = f"{parts[1]}-{parts[2]}"   # edge-a
+        return f"ems-worker-{zone}"
+    
+    return None
+
+def normalize_mps_std_metrics(raw_dict):
+    temp = {}
+    for pod_name, value in raw_dict.items():
+        dep = extract_worker_name_from_pdc(pod_name)
+        if not dep:
+            continue
+
+        temp.setdefault(dep, []).append(value)
+
+    result = {dep: np.mean(values) for dep, values in temp.items()}
+    return result
+
 def normalize_owner_metrics(raw_dict):
     result = {}
 
@@ -206,13 +235,15 @@ while True:
         cpu_actual_raw = query_prometheus(QUERY_CPU_ACTUAL)
         cpu_sd_raw = query_prometheus(QUERY_CPU_SD)
         latency_raw = query_prometheus(QUERY_LATENCY)
-        msg_raw = query_prometheus(QUERY_MSG_COUNT)
+        #msg_raw = query_prometheus(QUERY_MSG_COUNT)
+        mps_std_raw = query_prometheus(QUERY_MPS_STD)
 
         # 🔥 normalize
         cpu_actual = normalize_owner_metrics(cpu_actual_raw)
         cpu_sd = normalize_owner_metrics(cpu_sd_raw)
         latency = normalize_latency_metrics(latency_raw)
-        msg_count = normalize_msg_metrics(msg_raw)
+        mps_std = normalize_mps_std_metrics(mps_std_raw)
+        #msg_count = normalize_msg_metrics(msg_raw)
 
         # รวมเป็น DataFrame
         # รวม key ของ deployment ทั้งหมด
@@ -227,13 +258,14 @@ while True:
                 "cpu_actual": cpu_actual.get(dep, np.nan),
                 "cpu_sd": cpu_sd.get(dep, 0),
                 "latency": latency.get(dep, np.nan),
-                "msg_count": msg_count.get(dep, np.nan),
+                #"msg_count": msg_count.get(dep, np.nan),
+                "mps_std": mps_std.get(dep, np.nan),
             })
 
         df = pd.DataFrame(rows).set_index("deployment")
 
         # 🔥 filter เฉพาะข้อมูลที่ใช้ได้
-        df = df.dropna(subset=["cpu_pred", "cpu_actual", "msg_count"])
+        df = df.dropna(subset=["cpu_pred", "cpu_actual", "mps_std"])
 
         if df.empty:
             print("No data from Prometheus. Waiting...")
@@ -249,26 +281,31 @@ while True:
             cpu_sd = row['cpu_sd']
             avg_latency = row['latency']
             pred_error = row['pred_error']
-            msg = row['msg_count']
+            #msg = row['msg_count']
+            mps_std = row['mps_std']
 
             if avg_latency is None or np.isnan(avg_latency):
                 print(f"[{dep}] No latency → fallback")
                 avg_latency = L_max  # worst case → force scale up tendency
             
-            if msg is None or np.isnan(msg):
-                print(f"[{dep}] No msg_count → fallback")
-                msg = 0
+           #if msg is None or np.isnan(msg):
+            #    print(f"[{dep}] No msg_count → fallback")
+            #    msg = 0
+
+            if mps_std is None or np.isnan(mps_std):
+                print(f"[{dep}] No mps_std → fallback")
+                mps_std = 0
 
             s = get_state(dep)
             current_replicas = get_current_replicas(dep)
             if current_replicas is None: continue
 
             # 2. Compute Thresholds (Safety: ป้องกัน UT เป็น 0)
-            load_ratio = min(msg / MSG_MAX, 1.0)
+            load_ratio = min(mps_std / MPS_STD_MAX, 1.0)
             UT = UT_max - load_ratio * (UT_max - UT_min)
             LT = max(UT_min * 0.5, UT - K_HYSTERESIS * cpu_sd)
 
-            print(f"[DEBUG] {dep} | UT={UT:.2f}, LT={LT:.2f}, msg={msg:.3f}, SD={cpu_sd:.2f}")
+            print(f"[DEBUG] {dep} | UT={UT:.2f}, LT={LT:.2f}, mps_std={mps_std:.3f}, SD={cpu_sd:.2f}")
 
             if pred_error == 1:
                 target_cpu = cpu_actual
@@ -277,7 +314,7 @@ while True:
                 target_cpu = max(cpu_actual, cpu_pred)
                 mode = "HYBRID"
             
-            print(f"[DEBUG] {dep} | mode={mode} pred={cpu_pred:.2f} err={pred_error:.0f} actual={cpu_actual:.2f} msg={msg:.3f}")
+            print(f"[DEBUG] {dep} | mode={mode} pred={cpu_pred:.2f} err={pred_error:.0f} actual={cpu_actual:.2f} mps_std={mps_std:.3f}")
 
             print(f"[{dep}] CPU: {target_cpu:.2f}, UT: {UT:.2f}, LT: {LT:.2f}, Replicas: {current_replicas}")
 
