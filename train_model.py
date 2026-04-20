@@ -29,7 +29,7 @@ FEATURES = [
 ]
 
 WINDOW = 200         # -200s
-PRED_STEP = 80        # ทำนาย +80s
+PRED_STEP = 60        # ทำนาย +60s
 N_FEATURE = len(FEATURES)
 
 GAP_THRESHOLD = "5s"   
