@@ -243,7 +243,7 @@ for dep, df_dep in df.groupby("deployment"):
 
             future_cpu = seg["cpu_max"].values[i + WINDOW : i + WINDOW + PRED_STEP]
 
-            y = future_cpu[-1]
+            y = np.max(future_cpu)
 
             X_train_global.append(x)
             y_train_global.append(y)
@@ -260,7 +260,7 @@ for dep, df_dep in df.groupby("deployment"):
 
             future_cpu = seg["cpu_max"].values[i + WINDOW : i + WINDOW + PRED_STEP]
 
-            y = future_cpu[-1]
+            y = np.max(future_cpu)
 
             X_test_global.append(x)
             y_test_global.append(y)
