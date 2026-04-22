@@ -5,7 +5,7 @@ import joblib
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv1D, Dense, GlobalAveragePooling1D
+from tensorflow.keras.layers import Conv1D, Dense, Dropout, GlobalAveragePooling1D
 from sklearn.preprocessing import RobustScaler
 
 
@@ -164,14 +164,16 @@ model = Sequential([
     keras.Input(shape=(WINDOW, N_FEATURE)),
 
     Conv1D(64, 3, padding="causal", dilation_rate=1, activation="relu"),
+    Dropout(0.2),
     Conv1D(64, 3, padding="causal", dilation_rate=2, activation="relu"),
+    Dropout(0.2),
     Conv1D(64, 3, padding="causal", dilation_rate=4, activation="relu"),
-
     Conv1D(32, 3, padding="causal", dilation_rate=8, activation="relu"),
 
     GlobalAveragePooling1D(),
 
     Dense(64, activation="relu"),
+    Dropout(0.2),
     Dense(1)
 ])
 
@@ -317,10 +319,10 @@ history = model.fit(
     validation_data=(X_test, y_test),
     epochs=70,
     batch_size=64,
-    shuffle=True,
+    shuffle=False,
     callbacks=[
         keras.callbacks.EarlyStopping(
-            patience=8,
+            patience=10,
             restore_best_weights=True
         ),
         keras.callbacks.ReduceLROnPlateau(
