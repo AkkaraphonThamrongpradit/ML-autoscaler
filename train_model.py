@@ -317,7 +317,7 @@ history = model.fit(
     validation_data=(X_test, y_test),
     epochs=70,
     batch_size=64,
-    shuffle=False,
+    shuffle=True,
     callbacks=[
         keras.callbacks.EarlyStopping(
             patience=8,
