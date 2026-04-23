@@ -15,6 +15,7 @@ def load_data():
     SELECT *
     FROM autoscale_features
     WHERE time >= NOW() - INTERVAL '5 minutes'
+    AND deployment = 'ems-worker-edge-d'
     ORDER BY time ASC
     """
 
