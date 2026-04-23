@@ -20,7 +20,7 @@ QUERY_CPU_SD = 'stddev_over_time(max by (owner_name) (rate(container_cpu_usage_s
 #pod_name
 QUERY_LATENCY = 'sum by (pod_name) (ems_total_time_seconds{namespace="edge-apps"})'
 QUERY_MSG_COUNT = 'sum by (pod_name) (ems_message_count{namespace="edge-apps"})'
-QUERY_MPS_STD = 'avg by (pod_name) (stddev_over_time(pdc_realtime_mps{namespace="edge-apps"}[60s]))'
+QUERY_MPS_STD = 'avg by (pod_name) (stddev_over_time(pdc_realtime_mps{namespace="edge-apps"}[90s]))'
 
 NAMESPACE = "edge-apps"
 
@@ -33,13 +33,12 @@ SCALE_UP_COOLDOWN = 60
 SCALE_DOWN_COOLDOWN = 60
 LOOP_INTERVAL = 5
 
-K_HYSTERESIS = 1.5   # k คงที่
+K_HYSTERESIS = 25   # k คงที่
 
-UT_max = 500
+UT_max = 450
 UT_min = 300
 L_max = 60
-#MSG_MAX = 3000
-MPS_STD_MAX = 100
+MPS_STD_MAX = 10
 # =========================
 # KUBERNETES CLIENT
 # =========================
@@ -328,7 +327,7 @@ while True:
                     # ปรับเพิ่มแบบคำนวณจาก Ratio แต่ไม่เกิน MAX_SCALE_STEP
                     ideal_replicas = math.ceil(current_replicas * factor)
                     new_replicas = min(current_replicas + MAX_SCALE_STEP, ideal_replicas)
-                    
+                   
                     scale_deployment(dep, new_replicas)
                     s["last_scale_up"] = now
                 else:
